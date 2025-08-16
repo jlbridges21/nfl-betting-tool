@@ -33,8 +33,13 @@ export default function Header() {
   }, [supabase.auth])
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
+    try {
+      await supabase.auth.signOut()
+      setUser(null)
+      router.push('/')
+    } catch (error) {
+      console.error('Sign out error:', error)
+    }
   }
 
   return (
@@ -48,7 +53,7 @@ export default function Header() {
             </div>
             <nav className="hidden md:flex space-x-8">
               <a
-                href="/scoreboard"
+                href="/"
                 className="text-gray-500 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
               >
                 Scoreboard

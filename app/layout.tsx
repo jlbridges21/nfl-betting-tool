@@ -1,7 +1,10 @@
-import type { Metadata } from "next";
+'use client'
+
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Header from "./components/Header";
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,21 +16,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "NFL Prediction Tool",
-  description: "Predict NFL game outcomes with advanced analytics",
-};
-
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
     <html lang="en">
+      <head>
+        <title>NFL Prediction Tool</title>
+        <meta name="description" content="Predict NFL game outcomes with advanced analytics" />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <Header />
-        <main>{children}</main>
+        <QueryClientProvider client={queryClient}>
+          <Header />
+          <main>{children}</main>
+        </QueryClientProvider>
       </body>
     </html>
   );
