@@ -1,0 +1,120 @@
+
+NFL Betting Model & Prediction Tool – Project Scope
+
+This document acts as a single source of truth for the NFL Betting Model & Prediction Tool. Place this file in the project root so that AI coding assistants such as Cline/Claude can reference it for context. The scope is intentionally detailed to reduce ambiguity and should not be altered without updating any dependent development instructions.
+
+## Purpose
+
+Build a data‑driven web application that helps serious sports bettors make decisions by predicting NFL game scores. The app leverages team‑level statistics and a regression model stored in the database. Users can select teams, generate predictions, compare them to actual results, and track their own accuracy. A freemium model restricts free users to 5 predictions and offers unlimited predictions for $10/month via Stripe.
+
+## High‑Level Requirements
+
+  * **Frontend**: Next.js 14 (App Router) with TypeScript. Use shadcn/ui for UI components, TanStack Query for data fetching and caching, TanStack Table for tables, Zod for validation.  
+  * **Backend**: Supabase Postgres with Row Level Security (RLS). Supabase Edge Functions handle scheduled tasks (score sync) and Stripe webhooks.  
+  * **Authentication**: Supabase Auth (magic links or OAuth). Each user has an entry in `profiles` tied 1:1 with `auth.users`.  
+  * **Billing**: Stripe Checkout for subscriptions. Edge function handles subscription events and updates `is_premium` in `profiles`.  
+  * **Model**: A single linear regression model (Stage‑1). Coefficients stored in one row of `model_coefficients`. Predictions use the latest team stats snapshot. There is no per‑prediction weight editing or multiple versions.  
+  * **Score Sync**: A cron‑driven edge function fetches schedules/results and season‑to‑date stats from a sports data provider. It upserts `games` and `team_stats` and lets triggers update accuracy.  
+  * **Pages**: four main tabs – **Scoreboard**, **Predict**, **Profile**, **Team Stats**. Each is described in detail below.  
+  * **Testing**: Provide metrics on prediction accuracy, mean absolute error, and per‑team performance. Include QA steps and operations guides.
+
+## Functional Details
+
+### Scoreboard
+
+Shows all NFL games for a selected year (2023–2025) and week (1–18). Completed games display final scores and offensive yards. Scheduled games show matchup and kickoff time. Data comes from `public.games` with status `FINAL` or `SCHEDULED`.
+
+### Predict
+
+Authenticated users select two teams (home and away). The API first checks if those teams played in the 2025 regular season with a final result; if so, it returns the actual result and stores a history entry with `mode=historical`. Otherwise, it fetches the latest team stats, reads `model_coefficients`, computes the feature vector, and predicts scores. It stores a record in `user_predictions` and `model_predictions`. The freemium check enforces 5 free predictions; the sixth requires upgrading via Stripe.
+
+### Profile
+
+Only the logged‑in user’s prediction history is shown. Each entry lists the teams, predicted scores, actual scores (if available), and a boolean `was_accurate` (true if predicted winner equals actual winner). The page also displays aggregated metrics: overall accuracy, average signed error for home and away scores, mean absolute errors for home, away, spread, and total points, and per‑team accuracy counts. Metrics come from the `v_user_metrics` and `v_user_team_accuracy` views.
+
+### Team Stats
+
+Shows a sortable and filterable table of statistics for all teams. Users can choose the year and `as_of_week` or default to the latest snapshot (per team/year). Stats come from `team_stats` and the `team_stats_latest` view and include offensive and defensive metrics such as points per game, yards per game, passing/rushing yards, yards allowed, red zone efficiency, third‑down efficiency, turnover margin, etc.
+
+## Data Model (Database Schema Summary)
+
+All tables live in the `public` schema. RLS is enabled where appropriate. Key tables:
+
+  * **teams**: List of NFL teams. Columns include `id`, `name`, `abbreviation`, `conference`, `division`, `logo_url`, `primary_color`, `secondary_color`, `created_at`. RLS: publicly readable.  
+  * **team_aliases**: Maps external provider codes to internal team IDs (`team_id`). Primary key (`provider`, `alias`). Publicly readable.  
+  * **profiles**: Mirrors `auth.users`. Stores `is_premium`, `free_predictions_used`, `premium_activated_at`, `stripe_customer_id`, `stripe_subscription_id`. RLS: user can read/update their own row only.  
+  * **team_stats**: Snapshot of season‑to‑date stats for each team. Unique key `(team_id, year, as_of_week)`. Many numeric columns for offensive and defensive metrics. Upserted by the score‑sync function. Publicly readable.  
+  * **games**: Schedule and results. Unique key `(year, week, season_type, home_team_id, away_team_id)`. Status = `SCHEDULED` or `FINAL`. Stores scores and offensive yards when final. Publicly readable.  
+  * **user_predictions**: History of predictions per user. References `profiles` and `teams`. Stores creation time, actual scores, and `was_accurate`. RLS: owner can read/write only their own predictions.  
+  * **model_predictions**: Stores predicted scores corresponding to each user prediction. Unique per `user_prediction_id`. RLS: owner only.  
+  * **model_coefficients**: Single row (`id=1`) containing arrays `feature_names`, `home_coefs`, `away_coefs`, and intercepts. Used by the API to compute scores. Publicly readable.  
+  * **Views**:  
+    – `team_stats_latest`: For each team/year, returns the row with the highest `as_of_week`.  
+    – `v_user_metrics`: Aggregates per‑user accuracy and error statistics.  
+    – `v_user_team_accuracy`: Computes per‑user accuracy by team.
+
+### Database Functions and Triggers
+
+  * **fn_can_consume_prediction(u_id)**: Returns true if the user’s `is_premium` is true or `free_predictions_used < 5`. Enforces freemium rule.  
+  * **fn_increment_free_predictions(u_id)**: Increments `free_predictions_used` for non‑premium users. Called after storing a prediction.  
+  * **fn_update_prediction_accuracy()**: Trigger on `games` table. When a game finalizes, updates any matching `user_predictions` with actual scores and sets `was_accurate` based on predicted winner vs actual winner. Also links `game_id`.  
+  * **team_stats_latest**: View selecting the row with the largest `as_of_week` per team/year.  
+  * **v_user_metrics**: View aggregating counts, accuracy, signed error, and MAE per user.  
+  * **v_user_team_accuracy**: View aggregating accuracy per user by team.
+
+## Prediction Logic Summary
+
+  * The model is trained offline and its coefficients are stored in the `model_coefficients` row (`id=1`).  
+  * The feature vector is constructed using column names in `feature_names`. When a feature is prefixed with `off_`, the corresponding home value is taken from the home team stats and the defensive mirror (if present) is subtracted from the away team stats. Otherwise, compute `home_value – away_value`. Missing values default to 0.  
+  * Predicted scores are calculated by summing the product of features and coefficients and adding the intercept.  
+  * Historical override: if a regular season matchup already has a final result in the selected year, return the actual score instead of predicting (unless explicitly forced).  
+  * A prediction is considered accurate if and only if the predicted winner matches the actual winner.
+
+## Score Sync & Upserts
+
+  * A Supabase Edge Function called `score-sync` runs on a configurable schedule. Cron times are aligned with NFL game windows (multiple runs on Sundays, once each morning on other days, and late Monday nights).  
+  * The function fetches games and season‑to‑date stats from a sports data provider via `SPORTS_API_KEY`.  
+  * Games are upserted into `public.games` based on `(year, week, season_type, home_team_id, away_team_id)`. Final games populate scores and offensive yards; scheduled games leave those fields null.  
+  * Team stats are upserted into `team_stats` keyed by `(team_id, year, as_of_week)` using provider season stats. Option A is used (direct provider ingestion). Each upsert overwrites the snapshot for that week.  
+  * The trigger `fn_update_prediction_accuracy` updates `user_predictions` when games finalize.
+
+## Authentication & Freemium Model
+
+  * Users sign in via Supabase Auth. A corresponding row in `profiles` is created or updated to store premium status and free prediction count.  
+  * The `Predict` API checks `fn_can_consume_prediction` before processing. If the function returns false (user has used 5 predictions and is not premium), it responds with a 402 status and prompts an upgrade.  
+  * Stripe checkout is implemented via an API route that creates a subscription session. On successful subscription events, `is_premium` is set to true; on cancellation, it reverts to false.  
+
+## API Route Summary
+
+  * `/api/teams`: GET → returns all teams with names, colors, and logos.  
+  * `/api/scoreboard`: GET → requires `year` and `week` query parameters; returns games for that slot including scores and yards if final.  
+  * `/api/team-stats`: GET → requires `year`; optional `asOfWeek` to select a snapshot; defaults to the latest snapshot.  
+  * `/api/profile/predictions`: GET → authenticated; returns user’s predictions joined with actual results and model outputs.  
+  * `/api/profile/metrics`: GET → authenticated; returns aggregated metrics for the user.  
+  * `/api/predict`: POST → authenticated; accepts team IDs and optional season parameters; enforces the freemium limit; returns either a historical result or new predicted scores and logs the prediction.  
+  * `/api/stripe/create-checkout-session`: POST → authenticated; starts a Stripe checkout and returns the session URL.
+
+## Development Plan (High Level)
+
+  1. **Initialize repository**: Create a Next.js 14 TS project, install dependencies, configure Git/GitHub.  
+  2. **Define database**: Write schema SQL in `db/schema.sql` and apply it in Supabase. Seed teams, team aliases, and the model coefficients.  
+  3. **Set up environment**: Create `.env.local` with Supabase URL, keys, Stripe keys, and price ID. Keep secrets out of code.  
+  4. **Structure app**: Create `app`, `components`, `lib`, and API route directories. Use server components for data fetching where appropriate.  
+  5. **Implement API routes**: Write code for all API endpoints using Supabase JS (service role on server routes). Validate inputs with Zod. Use `fn_can_consume_prediction` for paywall logic.  
+  6. **Build UI**: Implement each tab with pages, forms, tables, and metrics using React components and shadcn/ui. Use TanStack Query for data fetching and caching.  
+  7. **Stripe integration**: Implement checkout session route, set up a product/price in Stripe, and deploy a webhook handler (Supabase Edge function) to set `is_premium`.  
+  8. **Score sync**: Build the `score-sync` Edge Function, map provider codes to internal teams, upsert games and team stats, and schedule cron jobs.  
+  9. **Deploy**: Connect GitHub repo to Vercel. Set environment variables. Deploy staging then production. Verify all flows.  
+  10. **Test & QA**: Create test users, make predictions, trigger paywall, upgrade via Stripe, run score sync, verify metrics. Document test steps and operations.  
+
+## Usage Guidelines
+
+  * **Reference this file** in your prompts to Cline or Claude by name (e.g. “See project_scope.txt for full details”) to ensure consistent context.  
+  * **Do not embed real secrets** (API keys, database keys, Stripe keys) into your prompts or code. Put them in `.env.local` and environment settings in Vercel and Supabase.  
+  * **Follow RLS**: Use Supabase service role only in server routes. Never fetch user‑specific data with the anon key in client components.  
+  * **Use exact filenames and paths** when instructing file creation to avoid confusion.  
+  * **Handle errors gracefully** in API and UI code. Return 400 for invalid inputs, 401 for unauthorized, 402 for paywall, 500 for unexpected failures.
+
+---
+
+This scope document covers everything needed to implement the NFL Betting Model & Prediction Tool: purpose, requirements, user flows, database schema, functions, prediction logic, synchronization logic, authentication, billing, API design, front‑end guidelines, development plan, deployment checklist, and usage instructions. Save it in the project root so that AI assistants can load it for context and follow it without ambiguity.

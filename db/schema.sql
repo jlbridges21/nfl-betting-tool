@@ -1,9 +1,6 @@
 -- NFL Betting Tool Database Schema
 -- This file contains the complete Supabase schema for the NFL Betting Model & Prediction Tool
 
--- Enable Row Level Security
-ALTER DATABASE postgres SET "app.jwt_secret" TO 'your-jwt-secret';
-
 -- Create teams table
 CREATE TABLE IF NOT EXISTS public.teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
