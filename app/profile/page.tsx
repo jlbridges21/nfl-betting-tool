@@ -65,8 +65,9 @@ export default function ProfilePage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
       })
-      if (!response.ok) throw new Error('Failed to fetch predictions')
-      return response.json()
+      if (response.status >= 400) throw new Error(`Failed to fetch predictions: ${response.status} ${response.statusText}`)
+      const result = await response.json()
+      return result
     },
     enabled: !!user,
   })
@@ -82,11 +83,17 @@ export default function ProfilePage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
       })
-      if (!response.ok) throw new Error('Failed to fetch metrics')
-      return response.json()
+      if (response.status >= 400) throw new Error(`Failed to fetch metrics: ${response.status} ${response.statusText}`)
+      const result = await response.json()
+      return result
     },
     enabled: !!user,
   })
+
+  // Safely extract arrays with fallbacks
+  const predictions = Array.isArray(predictionsData?.predictions) ? predictionsData.predictions : []
+  const metrics = metricsData?.metrics
+  const perTeamAccuracy = Array.isArray(metrics?.per_team_accuracy) ? metrics.per_team_accuracy : []
 
   if (loading) {
     return (
@@ -125,34 +132,38 @@ export default function ProfilePage() {
       {/* Metrics Cards */}
       {metricsLoading ? (
         <div className="mb-8">
-          <div className="text-gray-600">Loading metrics...</div>
+          <div className="animate-pulse grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-gray-200 rounded-lg h-24 w-full"></div>
+            ))}
+          </div>
         </div>
-      ) : metricsData?.metrics ? (
+      ) : metrics ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
             <div className="text-2xl font-bold text-indigo-600">
-              {(metricsData.metrics.overall_accuracy_pct * 100).toFixed(1)}%
+              {((metrics?.overall_accuracy_pct ?? 0) * 100).toFixed(1)}%
             </div>
             <div className="text-sm text-gray-600">Overall Accuracy</div>
           </div>
           
           <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
             <div className="text-2xl font-bold text-green-600">
-              {metricsData.metrics.avg_signed_home_error.toFixed(1)}
+              {(metrics?.avg_signed_home_error ?? 0).toFixed(1)}
             </div>
             <div className="text-sm text-gray-600">Avg Home Error</div>
           </div>
           
           <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
             <div className="text-2xl font-bold text-blue-600">
-              {metricsData.metrics.mae_spread.toFixed(1)}
+              {(metrics?.mae_spread ?? 0).toFixed(1)}
             </div>
             <div className="text-sm text-gray-600">MAE Spread</div>
           </div>
           
           <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
             <div className="text-2xl font-bold text-purple-600">
-              {metricsData.metrics.mae_total.toFixed(1)}
+              {(metrics?.mae_total ?? 0).toFixed(1)}
             </div>
             <div className="text-sm text-gray-600">MAE Total</div>
           </div>
@@ -166,9 +177,16 @@ export default function ProfilePage() {
           
           {predictionsLoading ? (
             <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-              <div className="text-gray-600">Loading predictions...</div>
+              <div className="animate-pulse">
+                <div className="text-gray-600 mb-4">Loading predictions...</div>
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="bg-gray-200 rounded h-12 w-full"></div>
+                  ))}
+                </div>
+              </div>
             </div>
-          ) : predictionsData?.predictions.length ? (
+          ) : predictions.length ? (
             <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -192,21 +210,21 @@ export default function ProfilePage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {predictionsData.predictions.map((prediction) => (
-                      <tr key={prediction.id}>
+                    {predictions.map((prediction) => (
+                      <tr key={prediction?.id || Math.random()}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {prediction.away_team} @ {prediction.home_team}
+                          {prediction?.away_team || 'TBD'} @ {prediction?.home_team || 'TBD'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {prediction.predicted_away_score} - {prediction.predicted_home_score}
+                          {prediction?.predicted_away_score ?? 'N/A'} - {prediction?.predicted_home_score ?? 'N/A'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {prediction.actual_away_score !== null && prediction.actual_home_score !== null
+                          {prediction?.actual_away_score !== null && prediction?.actual_home_score !== null
                             ? `${prediction.actual_away_score} - ${prediction.actual_home_score}`
                             : 'TBD'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {prediction.was_accurate !== null ? (
+                          {prediction?.was_accurate !== null ? (
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                               prediction.was_accurate 
                                 ? 'bg-green-100 text-green-800' 
@@ -221,7 +239,7 @@ export default function ProfilePage() {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(prediction.created_at).toLocaleDateString()}
+                          {prediction?.created_at ? new Date(prediction.created_at).toLocaleDateString() : 'N/A'}
                         </td>
                       </tr>
                     ))}
@@ -248,9 +266,16 @@ export default function ProfilePage() {
           
           {metricsLoading ? (
             <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-              <div className="text-gray-600">Loading team stats...</div>
+              <div className="animate-pulse">
+                <div className="text-gray-600 mb-4">Loading team stats...</div>
+                <div className="space-y-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="bg-gray-200 rounded h-8 w-full"></div>
+                  ))}
+                </div>
+              </div>
             </div>
-          ) : metricsData?.metrics.per_team_accuracy.length ? (
+          ) : perTeamAccuracy.length ? (
             <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
               <div className="max-h-96 overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -268,16 +293,16 @@ export default function ProfilePage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {metricsData.metrics.per_team_accuracy.map((team) => (
-                      <tr key={team.team_name}>
+                    {perTeamAccuracy.map((team) => (
+                      <tr key={team?.team_name || Math.random()}>
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {team.team_name}
+                          {team?.team_name || 'Unknown Team'}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                          {(team.accuracy_pct * 100).toFixed(1)}%
+                          {((team?.accuracy_pct ?? 0) * 100).toFixed(1)}%
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                          {team.prediction_count}
+                          {team?.prediction_count ?? 0}
                         </td>
                       </tr>
                     ))}

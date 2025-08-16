@@ -72,15 +72,19 @@ export default function TeamStatsPage() {
     queryKey: ['team-stats', selectedYear, selectedWeek],
     queryFn: async () => {
       const response = await fetch(`/api/team-stats?year=${selectedYear}&asOfWeek=${selectedWeek}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch team stats')
+      if (response.status >= 400) {
+        throw new Error(`Failed to fetch team stats: ${response.status} ${response.statusText}`)
       }
-      return response.json()
+      const result = await response.json()
+      return result
     },
   })
 
+  // Safely extract team stats array with fallback
+  const teamStats = Array.isArray(data?.team_stats) ? data.team_stats : []
+
   const table = useReactTable({
-    data: data?.team_stats ?? [],
+    data: teamStats,
     columns,
     state: {
       sorting,
@@ -141,7 +145,10 @@ export default function TeamStatsPage() {
       {/* Content */}
       {isLoading && (
         <div className="flex justify-center items-center py-12">
-          <div className="text-lg text-gray-600">Loading team statistics...</div>
+          <div className="animate-pulse">
+            <div className="text-lg text-gray-600 mb-4">Loading team statistics...</div>
+            <div className="bg-gray-200 rounded-lg h-64 w-full"></div>
+          </div>
         </div>
       )}
 
@@ -153,9 +160,9 @@ export default function TeamStatsPage() {
         </div>
       )}
 
-      {data && (
+      {!isLoading && !error && (
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-          {data.team_stats.length === 0 ? (
+          {teamStats.length === 0 ? (
             <div className="text-center py-12 text-gray-500">
               No team statistics found for {selectedYear} {selectedWeek === 'latest' ? '(latest)' : `Week ${selectedWeek}`}
             </div>
@@ -191,9 +198,9 @@ export default function TeamStatsPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {table.getRowModel().rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50">
+                    <tr key={row?.id || Math.random()} className="hover:bg-gray-50">
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td key={cell?.id || Math.random()} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
@@ -207,7 +214,7 @@ export default function TeamStatsPage() {
       )}
 
       {/* Legend */}
-      {data && data.team_stats.length > 0 && (
+      {!isLoading && !error && teamStats.length > 0 && (
         <div className="mt-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
           <h3 className="text-sm font-medium text-gray-900 mb-2">Legend</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-600">

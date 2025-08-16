@@ -39,12 +39,16 @@ export default function PredictPage() {
     queryKey: ['teams'],
     queryFn: async () => {
       const response = await fetch('/api/teams')
-      if (!response.ok) {
-        throw new Error('Failed to fetch teams')
+      if (response.status >= 400) {
+        throw new Error(`Failed to fetch teams: ${response.status} ${response.statusText}`)
       }
-      return response.json()
+      const result = await response.json()
+      return result
     },
   })
+
+  // Safely extract teams array with fallback
+  const teams = Array.isArray(teamsData?.teams) ? teamsData.teams : []
 
   const handlePredict = async () => {
     if (!homeTeamId || !awayTeamId) {
@@ -91,8 +95,8 @@ export default function PredictPage() {
         return
       }
 
-      if (!response.ok) {
-        throw new Error('Failed to get prediction')
+      if (response.status >= 400) {
+        throw new Error(`Failed to get prediction: ${response.status} ${response.statusText}`)
       }
 
       const result = await response.json()
@@ -130,9 +134,9 @@ export default function PredictPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 >
                   <option value="">Select away team</option>
-                  {teamsData?.teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name}
+                  {teams.map((team) => (
+                    <option key={team?.id || Math.random()} value={team?.id || ''}>
+                      {team?.name || 'Unknown Team'}
                     </option>
                   ))}
                 </select>
@@ -153,9 +157,9 @@ export default function PredictPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 >
                   <option value="">Select home team</option>
-                  {teamsData?.teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name}
+                  {teams.map((team) => (
+                    <option key={team?.id || Math.random()} value={team?.id || ''}>
+                      {team?.name || 'Unknown Team'}
                     </option>
                   ))}
                 </select>
@@ -200,23 +204,23 @@ export default function PredictPage() {
             
             <div className="text-center">
               <div className="text-lg font-medium text-gray-900 mb-4">
-                {prediction.away_team} @ {prediction.home_team}
+                {prediction?.away_team || 'TBD'} @ {prediction?.home_team || 'TBD'}
               </div>
 
-              {prediction.mode === 'predicted' ? (
+              {prediction?.mode === 'predicted' ? (
                 <div>
                   <div className="text-3xl font-bold text-indigo-600 mb-2">
-                    {prediction.away_team} {prediction.predicted_away_score} - {prediction.predicted_home_score} {prediction.home_team}
+                    {prediction?.away_team || 'TBD'} {prediction?.predicted_away_score ?? 'N/A'} - {prediction?.predicted_home_score ?? 'N/A'} {prediction?.home_team || 'TBD'}
                   </div>
                   <div className="text-sm text-gray-600">Predicted Score</div>
                 </div>
               ) : (
                 <div>
                   <div className="text-3xl font-bold text-gray-900 mb-2">
-                    {prediction.away_team} {prediction.actual_away_score} - {prediction.actual_home_score} {prediction.home_team}
+                    {prediction?.away_team || 'TBD'} {prediction?.actual_away_score ?? 'N/A'} - {prediction?.actual_home_score ?? 'N/A'} {prediction?.home_team || 'TBD'}
                   </div>
                   <div className="text-sm text-gray-600">
-                    Historical Result - Week {prediction.week}
+                    Historical Result - Week {prediction?.week || 'N/A'}
                   </div>
                 </div>
               )}
